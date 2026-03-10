@@ -1,15 +1,25 @@
+import os
 import sqlite3
 import sys
 from pathlib import Path
 
-from address_matching import (
-    canonicalize_component,
-    canonicalize_full_address,
-    parse_input_address,
-    score_candidate,
-)
+try:
+    from .address_matching import (
+        canonicalize_component,
+        canonicalize_full_address,
+        parse_input_address,
+        score_candidate,
+    )
+except ImportError:
+    from address_matching import (
+        canonicalize_component,
+        canonicalize_full_address,
+        parse_input_address,
+        score_candidate,
+    )
 
-DB_PATH = Path("/Users/ericbrown/SureLink/data/florida_property_lookup.db")
+DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "florida_property_lookup.db"
+DB_PATH = Path(os.getenv("SURELINK_DB_PATH", str(DEFAULT_DB_PATH))).expanduser()
 
 APPROVED_PROPERTY_TYPES = {"Single Family", "Townhouse"}
 MAX_PROPERTY_VALUE = 700000
@@ -251,6 +261,62 @@ def print_readable_result(result, property_row=None):
     print("Reason: {0}".format(result["reason"]))
 
 
+def lookup_property(full_address, db_path=None):
+    parsed = parse_input_address(full_address)
+    resolved_db_path = Path(db_path).expanduser() if db_path else DB_PATH
+
+    if not resolved_db_path.exists():
+        raise FileNotFoundError("SQLite database not found: {0}".format(resolved_db_path))
+
+    conn = sqlite3.connect(str(resolved_db_path))
+    try:
+        candidate_rows = fetch_candidate_rows(conn, parsed)
+        property_row, lookup_error = choose_best_match(parsed, candidate_rows)
+        owner_names = (
+            fetch_related_owners(conn, property_row["normalized_address"])
+            if property_row
+            else []
+        )
+    finally:
+        conn.close()
+
+    parsed_street, parsed_city = derive_output_parse(parsed, property_row)
+    normalized_address = canonicalize_full_address(parsed_street, parsed_city, parsed.zip_code)
+
+    if not property_row:
+        return {
+            "input_address": full_address,
+            "parsed_street": parsed_street,
+            "parsed_city": parsed_city,
+            "parsed_zip": parsed.zip_code,
+            "normalized_address": normalized_address,
+            "match_found": False,
+            "decision": "FAIL",
+            "reason": lookup_error,
+            "property_row": None,
+            "owners": [],
+            "county": None,
+            "eligibility_details": None,
+        }
+
+    decision, reason = decide_eligibility(property_row)
+
+    return {
+        "input_address": full_address,
+        "parsed_street": parsed_street,
+        "parsed_city": parsed_city,
+        "parsed_zip": parsed.zip_code,
+        "normalized_address": property_row["normalized_address"],
+        "match_found": True,
+        "decision": decision,
+        "reason": reason,
+        "property_row": property_row,
+        "owners": owner_names,
+        "county": property_row["county_source"],
+        "eligibility_details": build_eligibility_details(property_row),
+    }
+
+
 def main():
     if not DB_PATH.exists():
         raise FileNotFoundError("SQLite database not found: {0}".format(DB_PATH))
@@ -260,45 +326,24 @@ def main():
         print('python3 lookup_and_decide.py "234 Garden Grove Parkway, Vero Beach FL 32962"')
         sys.exit(1)
 
-    full_address = sys.argv[1]
-    parsed = parse_input_address(full_address)
-
-    conn = sqlite3.connect(str(DB_PATH))
-    candidate_rows = fetch_candidate_rows(conn, parsed)
-    property_row, lookup_error = choose_best_match(parsed, candidate_rows)
-    owner_names = fetch_related_owners(conn, property_row["normalized_address"]) if property_row else []
-    conn.close()
-
-    parsed_street, parsed_city = derive_output_parse(parsed, property_row)
-    normalized_address = canonicalize_full_address(parsed_street, parsed_city, parsed.zip_code)
+    result = lookup_property(sys.argv[1])
+    property_row = result["property_row"]
 
     if not property_row:
-        result = {
-            "input_address": full_address,
-            "parsed_street": parsed_street,
-            "parsed_city": parsed_city,
-            "parsed_zip": parsed.zip_code,
-            "normalized_address": normalized_address,
-            "match_found": False,
-            "decision": "FAIL",
-            "reason": lookup_error,
-        }
         print_readable_result(result)
         return
 
-    decision, reason = decide_eligibility(property_row)
-
     result = {
-        "input_address": full_address,
-        "parsed_street": parsed_street,
-        "parsed_city": parsed_city,
-        "parsed_zip": parsed.zip_code,
+        "input_address": result["input_address"],
+        "parsed_street": result["parsed_street"],
+        "parsed_city": result["parsed_city"],
+        "parsed_zip": result["parsed_zip"],
         "normalized_address": property_row["normalized_address"],
         "match_found": True,
-        "county": property_row["county_source"],
-        "owners": owner_names,
-        "decision": decision,
-        "reason": reason,
+        "county": result["county"],
+        "owners": result["owners"],
+        "decision": result["decision"],
+        "reason": result["reason"],
     }
 
     print_readable_result(result, property_row=property_row)

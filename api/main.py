@@ -1,5 +1,10 @@
+from datetime import datetime, timezone
+from typing import Any, Optional, Union
+
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
+
+from Scripts.lookup_and_decide import lookup_property
 
 
 app = FastAPI(title="SureLink API")
@@ -7,6 +12,114 @@ app = FastAPI(title="SureLink API")
 
 class VerifyHomeownerRequest(BaseModel):
     address: str = Field(..., min_length=1, description="Property address to verify")
+    record_id: Optional[str] = Field(default=None, description="Optional source record id")
+    email: Optional[str] = Field(default=None, description="Optional contact email")
+    phone: Optional[str] = Field(default=None, description="Optional contact phone")
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def build_response(
+    *,
+    status: str,
+    record_id: Optional[str],
+    address: str,
+    county: Optional[str],
+    verified: bool,
+    eligible: Optional[bool],
+    verification_status: str,
+    message: str,
+    homestead_exemption: Optional[bool],
+    property_value: Optional[Union[float, int]],
+    property_value_pass: Optional[bool],
+    manual_review_required: bool,
+    manual_review_reason: Optional[str],
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "record_id": record_id,
+        "address": address,
+        "county": county,
+        "verified": verified,
+        "eligible": eligible,
+        "verification_status": verification_status,
+        "message": message,
+        "homestead_exemption": homestead_exemption,
+        "property_value": property_value,
+        "property_value_pass": property_value_pass,
+        "manual_review_required": manual_review_required,
+        "manual_review_reason": manual_review_reason,
+        "checked_at": utc_now_iso(),
+    }
+
+
+def normalize_property_value(value: Optional[float]) -> Optional[Union[float, int]]:
+    if value is None:
+        return None
+    if float(value).is_integer():
+        return int(value)
+    return value
+
+
+def map_verification_result(payload: VerifyHomeownerRequest) -> dict[str, Any]:
+    lookup = lookup_property(payload.address.strip())
+    property_row = lookup["property_row"]
+    normalized_address = lookup["normalized_address"] or payload.address.strip()
+
+    if not property_row:
+        return build_response(
+            status="error",
+            record_id=payload.record_id,
+            address=normalized_address,
+            county=None,
+            verified=False,
+            eligible=None,
+            verification_status="manual_review",
+            message="Verification could not be completed automatically.",
+            homestead_exemption=None,
+            property_value=None,
+            property_value_pass=None,
+            manual_review_required=True,
+            manual_review_reason=lookup["reason"],
+        )
+
+    homestead_flag = property_row.get("homestead_flag")
+    property_value = property_row.get("property_value")
+    property_value_pass = None if property_value is None else property_value <= 700000
+
+    eligible = lookup["decision"] == "PASS"
+    verification_status = "eligible" if eligible else "ineligible"
+    message = (
+        "Property appears to meet current SureLink screening requirements."
+        if eligible
+        else lookup["reason"]
+    )
+    manual_review_required = False
+    manual_review_reason = None
+
+    if homestead_flag is None:
+        verification_status = "manual_review"
+        message = "Verification requires manual review."
+        manual_review_required = True
+        manual_review_reason = "Homestead exemption could not be verified from the property record."
+
+    return build_response(
+        status="success",
+        record_id=payload.record_id,
+        address=normalized_address,
+        county=lookup["county"],
+        verified=True,
+        eligible=eligible if verification_status != "manual_review" else None,
+        verification_status=verification_status,
+        message=message,
+        homestead_exemption=True if homestead_flag == 1 else False if homestead_flag == 0 else None,
+        property_value=normalize_property_value(property_value),
+        property_value_pass=property_value_pass,
+        manual_review_required=manual_review_required,
+        manual_review_reason=manual_review_reason,
+    )
 
 
 @app.get("/")
@@ -15,11 +128,40 @@ def read_root() -> dict[str, str]:
 
 
 @app.post("/verify-homeowner")
-def verify_homeowner(payload: VerifyHomeownerRequest) -> dict[str, object]:
-    normalized_address = payload.address.strip()
-    return {
-        "status": "placeholder",
-        "address": normalized_address,
-        "verified": False,
-        "message": "Homeowner verification is not implemented yet.",
-    }
+def verify_homeowner(payload: VerifyHomeownerRequest) -> dict[str, Any]:
+    raw_address = payload.address.strip()
+
+    try:
+        return map_verification_result(payload)
+    except FileNotFoundError as exc:
+        return build_response(
+            status="error",
+            record_id=payload.record_id,
+            address=raw_address,
+            county=None,
+            verified=False,
+            eligible=None,
+            verification_status="manual_review",
+            message="Verification could not be completed automatically.",
+            homestead_exemption=None,
+            property_value=None,
+            property_value_pass=None,
+            manual_review_required=True,
+            manual_review_reason=str(exc),
+        )
+    except Exception as exc:
+        return build_response(
+            status="error",
+            record_id=payload.record_id,
+            address=raw_address,
+            county=None,
+            verified=False,
+            eligible=None,
+            verification_status="manual_review",
+            message="Verification could not be completed automatically.",
+            homestead_exemption=None,
+            property_value=None,
+            property_value_pass=None,
+            manual_review_required=True,
+            manual_review_reason="Unexpected verification error: {0}".format(exc),
+        )
