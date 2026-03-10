@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Environment and secrets
+.env
+.env.*
+
+# Local data and sensitive documents
+data/
+.tmp.drivedownload/
+.tmp.driveupload/
+*.sqlite
+*.db
+*.csv
+*.xlsx
+*.xls
+*.pdf
+*.doc
+*.docx
+
