@@ -26,6 +26,11 @@ def build_response(
     status: str,
     record_id: Optional[str],
     address: str,
+    input_address: str,
+    matched_address: Optional[str],
+    address_corrected: bool,
+    match_confidence: Optional[float],
+    match_method: str,
     county: Optional[str],
     verified: bool,
     eligible: Optional[bool],
@@ -41,6 +46,11 @@ def build_response(
         "status": status,
         "record_id": record_id,
         "address": address,
+        "input_address": input_address,
+        "matched_address": matched_address,
+        "address_corrected": address_corrected,
+        "match_confidence": match_confidence,
+        "match_method": match_method,
         "county": county,
         "verified": verified,
         "eligible": eligible,
@@ -64,15 +74,25 @@ def normalize_property_value(value: Optional[float]) -> Optional[Union[float, in
 
 
 def map_verification_result(payload: VerifyHomeownerRequest) -> dict[str, Any]:
-    lookup = lookup_property(payload.address.strip())
+    input_address = payload.address.strip()
+    lookup = lookup_property(input_address)
     property_row = lookup["property_row"]
-    normalized_address = lookup["normalized_address"] or payload.address.strip()
+    normalized_address = lookup["normalized_address"] or input_address
+    matched_address = lookup.get("matched_address")
+    address_corrected = bool(lookup.get("address_corrected"))
+    match_confidence = lookup.get("match_confidence")
+    match_method = lookup.get("match_method", "normalize_only")
 
     if not property_row:
         return build_response(
             status="error",
             record_id=payload.record_id,
             address=normalized_address,
+            input_address=input_address,
+            matched_address=matched_address,
+            address_corrected=address_corrected,
+            match_confidence=match_confidence,
+            match_method=match_method,
             county=None,
             verified=False,
             eligible=None,
@@ -99,6 +119,13 @@ def map_verification_result(payload: VerifyHomeownerRequest) -> dict[str, Any]:
     manual_review_required = False
     manual_review_reason = None
 
+    if match_method == "fuzzy" and (match_confidence is None or match_confidence < 0.92):
+        verification_status = "manual_review"
+        message = "Verification requires manual review."
+        manual_review_required = True
+        manual_review_reason = "Address match confidence below automatic verification threshold."
+        eligible = None
+
     if homestead_flag is None:
         verification_status = "manual_review"
         message = "Verification requires manual review."
@@ -109,6 +136,11 @@ def map_verification_result(payload: VerifyHomeownerRequest) -> dict[str, Any]:
         status="success",
         record_id=payload.record_id,
         address=normalized_address,
+        input_address=input_address,
+        matched_address=matched_address,
+        address_corrected=address_corrected,
+        match_confidence=match_confidence,
+        match_method=match_method,
         county=lookup["county"],
         verified=True,
         eligible=eligible if verification_status != "manual_review" else None,
@@ -138,6 +170,11 @@ def verify_homeowner(payload: VerifyHomeownerRequest) -> dict[str, Any]:
             status="error",
             record_id=payload.record_id,
             address=raw_address,
+            input_address=raw_address,
+            matched_address=None,
+            address_corrected=False,
+            match_confidence=None,
+            match_method="normalize_only",
             county=None,
             verified=False,
             eligible=None,
@@ -154,6 +191,11 @@ def verify_homeowner(payload: VerifyHomeownerRequest) -> dict[str, Any]:
             status="error",
             record_id=payload.record_id,
             address=raw_address,
+            input_address=raw_address,
+            matched_address=None,
+            address_corrected=False,
+            match_confidence=None,
+            match_method="normalize_only",
             county=None,
             verified=False,
             eligible=None,

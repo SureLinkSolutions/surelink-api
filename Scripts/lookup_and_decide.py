@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import sys
+from difflib import SequenceMatcher
 from pathlib import Path
 
 try:
@@ -18,13 +19,15 @@ except ImportError:
         score_candidate,
     )
 
-DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "florida_property_lookup.db"
+DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "florida_property_runtime.db"
 DB_PATH = Path(os.getenv("SURELINK_DB_PATH", str(DEFAULT_DB_PATH))).expanduser()
 
 APPROVED_PROPERTY_TYPES = {"Single Family", "Townhouse"}
 MAX_PROPERTY_VALUE = 700000
 MAX_YEAR_BUILT = 2008
 MAX_CANDIDATES = 500
+HIGH_CONFIDENCE_THRESHOLD = 0.92
+REVIEW_CONFIDENCE_THRESHOLD = 0.80
 
 
 def format_currency(value):
@@ -77,11 +80,17 @@ def build_eligibility_details(row):
             "max_allowed": MAX_PROPERTY_VALUE,
         },
         "property_type_check": {
-            "status": "PASS" if property_type in APPROVED_PROPERTY_TYPES else "FAIL",
+            "status": "PASS" if property_type is None or property_type in APPROVED_PROPERTY_TYPES else "FAIL",
             "value": property_type,
             "allowed": sorted(APPROVED_PROPERTY_TYPES),
         },
     }
+
+
+def get_available_columns(conn):
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(properties)")
+    return {row[1] for row in cursor.fetchall()}
 
 
 def row_to_property(columns, row):
@@ -99,7 +108,33 @@ def row_to_property(columns, row):
     return result
 
 
-def fetch_related_owners(conn, normalized_address):
+def normalized_core(value):
+    tokens = (value or "").split()
+    if tokens and tokens[-1].isdigit() and len(tokens[-1]) == 5:
+        return " ".join(tokens[:-1])
+    return value or ""
+
+
+def calculate_match_confidence(parsed, candidate_address, method):
+    normalized_input = (parsed.canonical + " " + parsed.zip_code).strip()
+    candidate_full = candidate_address or ""
+
+    if method == "exact_normalized":
+        return 1.0
+
+    candidate_core = normalized_core(candidate_full)
+    input_core = parsed.canonical
+    core_similarity = SequenceMatcher(None, input_core, candidate_core).ratio()
+    full_similarity = SequenceMatcher(None, normalized_input, candidate_full).ratio()
+    house_bonus = 0.08 if parsed.house_number and candidate_core.startswith(parsed.house_number + " ") else 0.0
+    zip_bonus = 0.05 if parsed.zip_code and candidate_full.endswith(" " + parsed.zip_code) else 0.0
+    return min(0.99, round((core_similarity * 0.7) + (full_similarity * 0.3) + house_bonus + zip_bonus, 4))
+
+
+def fetch_related_owners(conn, normalized_address, available_columns):
+    if "owner_name" not in available_columns:
+        return []
+
     cursor = conn.cursor()
     cursor.execute(
         """
@@ -115,52 +150,93 @@ def fetch_related_owners(conn, normalized_address):
     return [row[0] for row in cursor.fetchall()]
 
 
-def fetch_candidate_rows(conn, parsed):
-    columns = [
+def base_columns():
+    return [
         "parcel_id",
-        "street_address",
         "normalized_address",
-        "city",
-        "zip",
-        "owner_name",
         "year_built",
-        "dor_uc",
-        "property_type_label",
         "homestead_flag",
         "property_value",
         "county_source",
+        "property_type_label",
+    ]
+
+
+def build_select_map(available_columns):
+    return {
+        "parcel_id": "parcel_id",
+        "normalized_address": "normalized_address",
+        "year_built": "year_built",
+        "homestead_flag": "homestead_flag" if "homestead_flag" in available_columns else "homestead_exemption AS homestead_flag",
+        "property_value": "property_value",
+        "county_source": "county_source" if "county_source" in available_columns else "county AS county_source",
+        "property_type_label": "property_type_label" if "property_type_label" in available_columns else "NULL AS property_type_label",
+    }
+
+
+def enrich_runtime_row(row):
+    row.setdefault("street_address", None)
+    row.setdefault("city", None)
+    row.setdefault("zip", None)
+    row.setdefault("owner_name", None)
+    row.setdefault("dor_uc", None)
+    return row
+
+
+def fetch_exact_row(conn, normalized_address, available_columns):
+    columns = base_columns()
+    query = """
+    SELECT
+        {parcel_id},
+        {normalized_address},
+        {year_built},
+        {homestead_flag},
+        {property_value},
+        {county_source},
+        {property_type_label}
+    FROM properties
+    WHERE normalized_address = ?
+    LIMIT 1
+    """.format(**build_select_map(available_columns))
+
+    cursor = conn.cursor()
+    cursor.execute(query, (normalized_address,))
+    row = cursor.fetchone()
+    if not row:
+        return None
+    return enrich_runtime_row(row_to_property(columns, row))
+
+
+def fetch_candidate_rows(conn, parsed, available_columns):
+    columns = [
+        *base_columns(),
     ]
 
     query = """
     SELECT
-        parcel_id,
-        street_address,
-        normalized_address,
-        city,
-        zip,
-        owner_name,
-        year_built,
-        dor_uc,
-        property_type_label,
-        homestead_flag,
-        property_value,
-        county_source
+        {parcel_id},
+        {normalized_address},
+        {year_built},
+        {homestead_flag},
+        {property_value},
+        {county_source},
+        {property_type_label}
     FROM properties
     WHERE normalized_address LIKE ?
-    """
+    """.format(**build_select_map(available_columns))
 
     params = [parsed.house_number + " %"] if parsed.house_number else ["%"]
 
     if parsed.zip_code:
-        query += " AND zip = ?"
-        params.append(parsed.zip_code)
+        query += " AND normalized_address LIKE ?"
+        params.append("% " + parsed.zip_code)
 
     query += " LIMIT ?"
     params.append(MAX_CANDIDATES)
 
     cursor = conn.cursor()
     cursor.execute(query, params)
-    return [row_to_property(columns, row) for row in cursor.fetchall()]
+    return [enrich_runtime_row(row_to_property(columns, row)) for row in cursor.fetchall()]
 
 
 def score_rows(parsed, rows):
@@ -168,12 +244,13 @@ def score_rows(parsed, rows):
     input_with_zip = (parsed.canonical + " " + parsed.zip_code).strip()
 
     for row in rows:
-        street_tokens = canonicalize_component(row["street_address"]).split()
-        city_tokens = canonicalize_component(row["city"], city_mode=True).split()
-        canonical_db = canonicalize_full_address(row["street_address"], row["city"], row["zip"])
+        canonical_db = row["normalized_address"]
+        candidate_core = normalized_core(canonical_db)
+        street_tokens = candidate_core.split()
+        city_tokens = []
 
         score = score_candidate(parsed.tokens, street_tokens, city_tokens)
-        if parsed.zip_code and str(row["zip"]).split(".")[0] == parsed.zip_code:
+        if parsed.zip_code and canonical_db.endswith(" " + parsed.zip_code):
             score += 150
 
         if parsed.zip_code and canonical_db == input_with_zip:
@@ -196,7 +273,7 @@ def score_rows(parsed, rows):
 
 def choose_best_match(parsed, rows):
     if not rows:
-        return None, "Property not found"
+        return None, "Property not found", 0.0, "no_match"
 
     scored = score_rows(parsed, rows)
     input_with_zip = (parsed.canonical + " " + parsed.zip_code).strip()
@@ -204,37 +281,35 @@ def choose_best_match(parsed, rows):
 
     exact_matches = [item for item in scored if item["canonical_full"] == input_with_zip]
     if len(exact_matches) == 1:
-        return exact_matches[0]["row"], None
+        return exact_matches[0]["row"], None, 1.0, "exact_normalized"
 
     exact_core_matches = [item for item in scored if item["canonical_core"] == input_core]
     if len(exact_core_matches) == 1:
-        return exact_core_matches[0]["row"], None
+        confidence = calculate_match_confidence(parsed, exact_core_matches[0]["row"]["normalized_address"], "fuzzy")
+        return exact_core_matches[0]["row"], None, confidence, "fuzzy"
     if len(exact_core_matches) > 1:
-        return None, "Ambiguous property match"
+        return None, "Ambiguous property match", 0.0, "ambiguous"
 
     best = scored[0]
-    if best["score"] < 500:
-        return None, "Property not found"
+    confidence = calculate_match_confidence(parsed, best["row"]["normalized_address"], "fuzzy")
+    if best["score"] < 500 or confidence < REVIEW_CONFIDENCE_THRESHOLD:
+        return None, "Property not found", confidence, "fuzzy"
 
     ties = [item for item in scored if item["score"] == best["score"]]
     if len(ties) > 1:
-        return None, "Ambiguous property match"
+        return None, "Ambiguous property match", confidence, "ambiguous"
 
     if len(scored) > 1 and best["score"] - scored[1]["score"] < 80:
-        return None, "Ambiguous property match"
+        return None, "Ambiguous property match", confidence, "ambiguous"
 
-    return best["row"], None
+    return best["row"], None, confidence, "fuzzy"
 
 
 def derive_output_parse(parsed, property_row):
     if property_row:
-        return property_row["street_address"], property_row["city"]
+        return property_row["normalized_address"], ""
 
-    tokens = parsed.tokens
-    if len(tokens) < 2:
-        return parsed.display_core, ""
-
-    return " ".join(tokens[:-1]), tokens[-1]
+    return parsed.display_core, ""
 
 
 def print_readable_result(result, property_row=None):
@@ -264,16 +339,28 @@ def print_readable_result(result, property_row=None):
 def lookup_property(full_address, db_path=None):
     parsed = parse_input_address(full_address)
     resolved_db_path = Path(db_path).expanduser() if db_path else DB_PATH
+    normalized_input = (parsed.canonical + " " + parsed.zip_code).strip()
 
     if not resolved_db_path.exists():
         raise FileNotFoundError("SQLite database not found: {0}".format(resolved_db_path))
 
     conn = sqlite3.connect(str(resolved_db_path))
     try:
-        candidate_rows = fetch_candidate_rows(conn, parsed)
-        property_row, lookup_error = choose_best_match(parsed, candidate_rows)
+        available_columns = get_available_columns(conn)
+        property_row = fetch_exact_row(conn, normalized_input, available_columns)
+        lookup_error = None
+        match_confidence = 0.0
+        match_method = "normalize_only"
+
+        if property_row:
+            match_confidence = 1.0
+            match_method = "exact_normalized"
+        else:
+            candidate_rows = fetch_candidate_rows(conn, parsed, available_columns)
+            property_row, lookup_error, match_confidence, match_method = choose_best_match(parsed, candidate_rows)
+
         owner_names = (
-            fetch_related_owners(conn, property_row["normalized_address"])
+            fetch_related_owners(conn, property_row["normalized_address"], available_columns)
             if property_row
             else []
         )
@@ -281,7 +368,9 @@ def lookup_property(full_address, db_path=None):
         conn.close()
 
     parsed_street, parsed_city = derive_output_parse(parsed, property_row)
-    normalized_address = canonicalize_full_address(parsed_street, parsed_city, parsed.zip_code)
+    normalized_address = property_row["normalized_address"] if property_row else normalized_input
+    matched_address = property_row["normalized_address"] if property_row else None
+    address_corrected = bool(property_row and matched_address != normalized_input)
 
     if not property_row:
         return {
@@ -297,9 +386,16 @@ def lookup_property(full_address, db_path=None):
             "owners": [],
             "county": None,
             "eligibility_details": None,
+            "matched_address": None,
+            "address_corrected": False,
+            "match_confidence": match_confidence,
+            "match_method": match_method,
         }
 
     decision, reason = decide_eligibility(property_row)
+    if match_method == "fuzzy" and match_confidence < HIGH_CONFIDENCE_THRESHOLD:
+        decision = "FAIL"
+        reason = "Address match confidence too low for automatic verification"
 
     return {
         "input_address": full_address,
@@ -314,6 +410,10 @@ def lookup_property(full_address, db_path=None):
         "owners": owner_names,
         "county": property_row["county_source"],
         "eligibility_details": build_eligibility_details(property_row),
+        "matched_address": matched_address,
+        "address_corrected": address_corrected,
+        "match_confidence": match_confidence,
+        "match_method": match_method,
     }
 
 
