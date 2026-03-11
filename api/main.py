@@ -21,6 +21,88 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def to_review_yes_no(value: Optional[bool]) -> Optional[str]:
+    if value is True:
+        return "Yes"
+    if value is False:
+        return "No"
+    return None
+
+
+def normalize_review_property_type(property_type: Optional[str]) -> Optional[str]:
+    if not property_type:
+        return None
+
+    normalized = " ".join(property_type.strip().lower().replace("-", " ").split())
+
+    exact_map = {
+        "single family": "Single Family Home",
+        "single family home": "Single Family Home",
+        "sfr": "Single Family Home",
+        "townhouse": "Townhome",
+        "townhome": "Townhome",
+        "condo": "Condo",
+        "condominium": "Condo",
+        "multi family": "Multi-Family",
+        "multifamily": "Multi-Family",
+        "mobile home": "Mobile Home",
+        "manufactured home": "Mobile Home",
+    }
+    if normalized in exact_map:
+        return exact_map[normalized]
+
+    if "single family" in normalized:
+        return "Single Family Home"
+    if "townhome" in normalized or "townhouse" in normalized:
+        return "Townhome"
+    if "condo" in normalized or "condominium" in normalized:
+        return "Condo"
+    if "multi" in normalized and "family" in normalized:
+        return "Multi-Family"
+    if "mobile" in normalized or "manufactured" in normalized:
+        return "Mobile Home"
+
+    return None
+
+
+def normalize_final_decision(
+    eligible: Optional[bool],
+    verification_status: str,
+    manual_review_required: bool,
+) -> Optional[str]:
+    if manual_review_required or verification_status == "manual_review" or eligible is None:
+        return None
+    return "Pass" if eligible else "Fail"
+
+
+def normalize_fail_reason(
+    *,
+    eligible: Optional[bool],
+    verification_status: str,
+    manual_review_required: bool,
+    message: str,
+) -> Optional[str]:
+    if manual_review_required or verification_status == "manual_review" or eligible is not False:
+        return None
+
+    normalized = (message or "").strip().lower()
+    if not normalized:
+        return None
+
+    if normalized.startswith("property type not eligible"):
+        return "Property Type"
+    if normalized.startswith("property value exceeds"):
+        return "Property Value"
+    if normalized == "not homestead property":
+        return "No Homestead Exemption"
+    if normalized.startswith("home built after"):
+        return "Year Built"
+    if "out of state" in normalized:
+        return "Out of State"
+
+    return None
+
+
 def build_response(
     *,
     status: str,
@@ -71,6 +153,20 @@ def build_response(
         "property_value_pass": property_value_pass,
         "manual_review_required": manual_review_required,
         "manual_review_reason": manual_review_reason,
+        "review_homestead": to_review_yes_no(homestead_exemption),
+        "review_owner_match": None,
+        "review_property_type": normalize_review_property_type(property_type),
+        "final_decision": normalize_final_decision(
+            eligible,
+            verification_status,
+            manual_review_required,
+        ),
+        "fail_reason": normalize_fail_reason(
+            eligible=eligible,
+            verification_status=verification_status,
+            manual_review_required=manual_review_required,
+            message=message,
+        ),
         "checked_at": utc_now_iso(),
     }
 
