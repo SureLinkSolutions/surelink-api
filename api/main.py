@@ -4,7 +4,7 @@ from typing import Any, Optional, Union
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-from Scripts.lookup_and_decide import lookup_property
+from Scripts.lookup_and_decide import APPROVED_PROPERTY_TYPES, lookup_property
 
 
 app = FastAPI(title="SureLink API")
@@ -38,6 +38,10 @@ def build_response(
     verification_status: str,
     message: str,
     homestead_exemption: Optional[bool],
+    year_built: Optional[int],
+    year_built_pass: Optional[bool],
+    property_type: Optional[str],
+    property_type_pass: Optional[bool],
     property_value: Optional[Union[float, int]],
     property_value_pass: Optional[bool],
     manual_review_required: bool,
@@ -59,6 +63,10 @@ def build_response(
         "verification_status": verification_status,
         "message": message,
         "homestead_exemption": homestead_exemption,
+        "year_built": year_built,
+        "year_built_pass": year_built_pass,
+        "property_type": property_type,
+        "property_type_pass": property_type_pass,
         "property_value": property_value,
         "property_value_pass": property_value_pass,
         "manual_review_required": manual_review_required,
@@ -102,6 +110,10 @@ def map_verification_result(payload: VerifyHomeownerRequest) -> dict[str, Any]:
             verification_status="manual_review",
             message="Verification could not be completed automatically.",
             homestead_exemption=None,
+            year_built=None,
+            year_built_pass=None,
+            property_type=None,
+            property_type_pass=None,
             property_value=None,
             property_value_pass=None,
             manual_review_required=True,
@@ -109,7 +121,11 @@ def map_verification_result(payload: VerifyHomeownerRequest) -> dict[str, Any]:
         )
 
     homestead_flag = property_row.get("homestead_flag")
+    year_built = property_row.get("year_built")
+    property_type = property_row.get("property_type_label")
     property_value = property_row.get("property_value")
+    year_built_pass = None if year_built is None else year_built <= 2008
+    property_type_pass = None if property_type is None else property_type in APPROVED_PROPERTY_TYPES
     property_value_pass = None if property_value is None else property_value <= 700000
 
     eligible = lookup["decision"] == "PASS"
@@ -151,6 +167,10 @@ def map_verification_result(payload: VerifyHomeownerRequest) -> dict[str, Any]:
         verification_status=verification_status,
         message=message,
         homestead_exemption=True if homestead_flag == 1 else False if homestead_flag == 0 else None,
+        year_built=year_built,
+        year_built_pass=year_built_pass,
+        property_type=property_type,
+        property_type_pass=property_type_pass,
         property_value=normalize_property_value(property_value),
         property_value_pass=property_value_pass,
         manual_review_required=manual_review_required,
@@ -186,6 +206,10 @@ def verify_homeowner(payload: VerifyHomeownerRequest) -> dict[str, Any]:
             verification_status="manual_review",
             message="Verification could not be completed automatically.",
             homestead_exemption=None,
+            year_built=None,
+            year_built_pass=None,
+            property_type=None,
+            property_type_pass=None,
             property_value=None,
             property_value_pass=None,
             manual_review_required=True,
@@ -208,6 +232,10 @@ def verify_homeowner(payload: VerifyHomeownerRequest) -> dict[str, Any]:
             verification_status="manual_review",
             message="Verification could not be completed automatically.",
             homestead_exemption=None,
+            year_built=None,
+            year_built_pass=None,
+            property_type=None,
+            property_type_pass=None,
             property_value=None,
             property_value_pass=None,
             manual_review_required=True,
