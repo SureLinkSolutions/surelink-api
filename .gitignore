@@ -1,4 +1,15 @@
+# Ignore SQLite databases
 data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Mac system files
+.DS_Storedata/*.db
 data/*.db-wal
 data/*.db-shm
 # macOS
