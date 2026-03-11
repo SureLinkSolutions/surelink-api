@@ -11,6 +11,12 @@ MAX_PROPERTY_VALUE = 700000
 MAX_YEAR_BUILT = 2008
 
 
+def get_available_columns(conn: sqlite3.Connection) -> set[str]:
+    cursor = conn.cursor()
+    cursor.execute(f"PRAGMA main.table_info({TABLE_NAME})")
+    return {row[1] for row in cursor.fetchall()}
+
+
 def file_size_mb(path: Path) -> float:
     return path.stat().st_size / (1024 * 1024)
 
@@ -25,6 +31,9 @@ def main():
 
     conn = sqlite3.connect(str(SOURCE_DB_PATH))
     try:
+        source_columns = get_available_columns(conn)
+        owner_name_select = "owner_name" if "owner_name" in source_columns else "NULL AS owner_name"
+
         conn.execute("ATTACH DATABASE ? AS diagnostic_db", (str(DIAGNOSTIC_DB_PATH),))
         conn.execute("PRAGMA diagnostic_db.journal_mode=OFF;")
         conn.execute("PRAGMA diagnostic_db.synchronous=OFF;")
@@ -39,7 +48,7 @@ def main():
                 normalized_address,
                 city,
                 zip,
-                owner_name,
+                {owner_name_select},
                 year_built,
                 homestead_flag,
                 property_value,
@@ -53,7 +62,7 @@ def main():
                 AND property_value <= ?
                 AND (year_built IS NULL OR year_built <= ?)
             )
-            """,
+            """.format(owner_name_select=owner_name_select),
             (*APPROVED_PROPERTY_TYPES, MAX_PROPERTY_VALUE, MAX_YEAR_BUILT),
         )
         conn.execute(

@@ -492,6 +492,7 @@ def lookup_property(full_address, db_path=None):
     lookup_error = result["lookup_error"]
     match_confidence = result["match_confidence"]
     match_method = result["match_method"]
+    owner_name = property_row.get("owner_name") if property_row else None
     owner_names = result["owner_names"]
 
     if not property_row and diagnostic_db_path.exists() and diagnostic_db_path != resolved_db_path:
@@ -500,6 +501,7 @@ def lookup_property(full_address, db_path=None):
         lookup_error = diagnostic_result["lookup_error"]
         match_confidence = diagnostic_result["match_confidence"]
         match_method = diagnostic_result["match_method"]
+        owner_name = property_row.get("owner_name") if property_row else None
         owner_names = diagnostic_result["owner_names"]
 
     parsed_street, parsed_city = derive_output_parse(parsed, property_row)
@@ -518,6 +520,7 @@ def lookup_property(full_address, db_path=None):
             "decision": "FAIL",
             "reason": lookup_error,
             "property_row": None,
+            "owner_name": None,
             "owners": [],
             "county": None,
             "eligibility_details": None,
@@ -542,6 +545,7 @@ def lookup_property(full_address, db_path=None):
         "decision": decision,
         "reason": reason,
         "property_row": property_row,
+        "owner_name": owner_name,
         "owners": owner_names,
         "county": property_row["county_source"],
         "eligibility_details": build_eligibility_details(property_row),
