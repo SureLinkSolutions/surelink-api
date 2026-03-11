@@ -50,10 +50,17 @@ UNIT_WORDS = {"APT", "UNIT", "STE", "SUITE"}
 @dataclass
 class ParsedAddress:
     full_address: str
+    street: str
+    city: str
+    state: str
     zip_code: str
     house_number: str
     tokens: list[str]
+    street_tokens: list[str]
+    city_tokens: list[str]
     canonical: str
+    canonical_street: str
+    canonical_city: str
     display_core: str
 
 
@@ -105,34 +112,116 @@ def canonicalize_full_address(street, city, zip_code=""):
     return " ".join(part for part in parts if part).strip()
 
 
-def parse_input_address(full_address):
-    cleaned = _clean_text(full_address)
-    zip_match = re.search(r"(\d{5})(?:-\d{4})?$", cleaned)
+def _extract_zip_and_state(full_address):
+    raw = str(full_address or "").upper().strip()
+
+    zip_match = re.search(r"(\d{5})(?:-\d{4})?\s*$", raw)
     zip_code = zip_match.group(1) if zip_match else ""
+    if zip_match:
+        raw = raw[:zip_match.start()].strip(" ,")
 
-    if zip_code:
-        cleaned = re.sub(r"(\d{5})(?:-\d{4})?$", "", cleaned).strip()
+    state = ""
+    state_match = re.search(r"\b(FL|FLORIDA)\b\s*$", raw)
+    if state_match:
+        state = state_match.group(1)
+        raw = raw[:state_match.start()].strip(" ,")
 
+    return raw, zip_code, state
+
+
+def _split_street_city(raw_without_zip_state):
+    if not raw_without_zip_state:
+        return "", ""
+
+    comma_parts = [part.strip() for part in raw_without_zip_state.split(",") if part.strip()]
+    if len(comma_parts) >= 2:
+        return comma_parts[0], comma_parts[1]
+
+    cleaned = _clean_text(raw_without_zip_state)
     tokens = cleaned.split()
-    while tokens and tokens[-1] in STATE_WORDS:
-        tokens.pop()
+    if not tokens:
+        return "", ""
 
-    canonical_tokens = []
-    for token in tokens:
-        canonical = _canonicalize_token(token, city_mode=False)
-        if canonical:
-            canonical_tokens.append(canonical)
+    street_type_values = set(STREET_TYPE_ALIASES.values()) | set(STREET_TYPE_ALIASES.keys())
+    boundary = None
+    for index, token in enumerate(tokens):
+        if token in street_type_values:
+            boundary = index + 1
 
-    house_number = canonical_tokens[0] if canonical_tokens else ""
-    display_core = " ".join(tokens)
+    if boundary is not None:
+        while boundary < len(tokens) and re.search(r"\d", tokens[boundary]):
+            boundary += 1
+        street_tokens = tokens[:boundary]
+        city_tokens = tokens[boundary:]
+        return " ".join(street_tokens), " ".join(city_tokens)
+
+    return " ".join(tokens), ""
+
+
+def split_normalized_address(normalized_address):
+    cleaned = _clean_text(normalized_address)
+    tokens = cleaned.split()
+    if not tokens:
+        return {"street": "", "city": "", "zip_code": "", "street_tokens": [], "city_tokens": []}
+
+    zip_code = tokens[-1] if re.fullmatch(r"\d{5}", tokens[-1]) else ""
+    core_tokens = tokens[:-1] if zip_code else tokens
+
+    street_type_values = set(STREET_TYPE_ALIASES.values())
+    boundary = None
+    for index, token in enumerate(core_tokens):
+        if token in street_type_values:
+            boundary = index + 1
+
+    if boundary is None:
+        return {
+            "street": " ".join(core_tokens),
+            "city": "",
+            "zip_code": zip_code,
+            "street_tokens": core_tokens,
+            "city_tokens": [],
+        }
+
+    while boundary < len(core_tokens) and re.search(r"\d", core_tokens[boundary]):
+        boundary += 1
+
+    street_tokens = core_tokens[:boundary]
+    city_tokens = core_tokens[boundary:]
+    return {
+        "street": " ".join(street_tokens),
+        "city": " ".join(city_tokens),
+        "zip_code": zip_code,
+        "street_tokens": street_tokens,
+        "city_tokens": city_tokens,
+    }
+
+
+def parse_input_address(full_address):
+    raw_without_zip_state, zip_code, state = _extract_zip_and_state(full_address)
+    street, city = _split_street_city(raw_without_zip_state)
+
+    canonical_street = canonicalize_component(street)
+    canonical_city = canonicalize_component(city, city_mode=True)
+    street_tokens = canonical_street.split() if canonical_street else []
+    city_tokens = canonical_city.split() if canonical_city else []
+    canonical_tokens = street_tokens + city_tokens
+    house_number = street_tokens[0] if street_tokens else ""
+    display_core = " ".join(part for part in [street, city] if part).strip()
     canonical = " ".join(canonical_tokens)
 
     return ParsedAddress(
         full_address=full_address,
+        street=street,
+        city=city,
+        state=state,
         zip_code=zip_code,
         house_number=house_number,
         tokens=canonical_tokens,
+        street_tokens=street_tokens,
+        city_tokens=city_tokens,
         canonical=canonical,
+        canonical_street=canonical_street,
+        canonical_city=canonical_city,
         display_core=display_core,
     )
 

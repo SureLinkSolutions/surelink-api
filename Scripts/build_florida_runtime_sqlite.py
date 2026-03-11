@@ -35,12 +35,16 @@ def main():
             f"""
             CREATE TABLE runtime_db.{TABLE_NAME} AS
             SELECT
+                parcel_id,
                 normalized_address,
+                city,
+                zip,
+                owner_name,
+                year_built,
+                property_type_label,
                 county_source AS county,
                 homestead_flag AS homestead_exemption,
-                property_value,
-                parcel_id,
-                year_built
+                property_value
             FROM main.{TABLE_NAME}
             WHERE homestead_flag = 1
               AND property_type_label IN (?, ?)
