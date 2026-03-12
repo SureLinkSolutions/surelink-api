@@ -43,8 +43,14 @@ CITY_ALIASES = {
     "ST": "ST",
 }
 
+CITY_PHRASE_ALIASES = {
+    ("ST", "PETE"): ("ST", "PETERSBURG"),
+    ("SAINT", "PETE"): ("ST", "PETERSBURG"),
+}
+
 STATE_WORDS = {"FL", "FLORIDA"}
 UNIT_WORDS = {"APT", "UNIT", "STE", "SUITE"}
+DIRECTIONAL_WORDS = {"N", "S", "E", "W", "NE", "NW", "SE", "SW"}
 
 
 @dataclass
@@ -97,11 +103,34 @@ def _canonicalize_token(token, city_mode=False):
 
 
 def canonicalize_component(value, city_mode=False):
+    raw_tokens = _clean_text(value).split()
+    if city_mode:
+        normalized_tokens = []
+        index = 0
+        while index < len(raw_tokens):
+            phrase = tuple(raw_tokens[index:index + 2])
+            if len(phrase) == 2 and phrase in CITY_PHRASE_ALIASES:
+                normalized_tokens.extend(CITY_PHRASE_ALIASES[phrase])
+                index += 2
+                continue
+            normalized_tokens.append(raw_tokens[index])
+            index += 1
+        raw_tokens = normalized_tokens
+
     tokens = []
-    for token in _clean_text(value).split():
+    for token in raw_tokens:
         canonical = _canonicalize_token(token, city_mode=city_mode)
         if canonical:
             tokens.append(canonical)
+
+    if city_mode and tokens:
+        deduped = []
+        for token in tokens:
+            deduped.append(token)
+            if len(deduped) >= 4 and deduped[-4:-2] == deduped[-2:]:
+                deduped = deduped[:-2]
+        tokens = deduped
+
     return " ".join(tokens)
 
 
@@ -114,6 +143,8 @@ def canonicalize_full_address(street, city, zip_code=""):
 
 def _extract_zip_and_state(full_address):
     raw = str(full_address or "").upper().strip()
+    raw = re.sub(r"\b(?:FL|FLORIDA)\b\s+\d{5}(?:-\d{4})?\b(?=\s+[A-Z])", " ", raw)
+    raw = re.sub(r"\s+", " ", raw).strip()
 
     zip_match = re.search(r"(\d{5})(?:-\d{4})?\s*$", raw)
     zip_code = zip_match.group(1) if zip_match else ""
@@ -147,8 +178,11 @@ def _split_street_city(raw_without_zip_state):
     for index, token in enumerate(tokens):
         if token in street_type_values:
             boundary = index + 1
+            break
 
     if boundary is not None:
+        while boundary < len(tokens) and tokens[boundary] in DIRECTIONAL_WORDS:
+            boundary += 1
         while boundary < len(tokens) and re.search(r"\d", tokens[boundary]):
             boundary += 1
         street_tokens = tokens[:boundary]
@@ -172,6 +206,7 @@ def split_normalized_address(normalized_address):
     for index, token in enumerate(core_tokens):
         if token in street_type_values:
             boundary = index + 1
+            break
 
     if boundary is None:
         return {
@@ -182,14 +217,21 @@ def split_normalized_address(normalized_address):
             "city_tokens": [],
         }
 
+    while boundary < len(core_tokens) and core_tokens[boundary] in DIRECTIONAL_WORDS:
+        boundary += 1
+
     while boundary < len(core_tokens) and re.search(r"\d", core_tokens[boundary]):
         boundary += 1
 
     street_tokens = core_tokens[:boundary]
     city_tokens = core_tokens[boundary:]
+    canonical_street = canonicalize_component(" ".join(street_tokens))
+    canonical_city = canonicalize_component(" ".join(city_tokens), city_mode=True)
+    street_tokens = canonical_street.split() if canonical_street else []
+    city_tokens = canonical_city.split() if canonical_city else []
     return {
-        "street": " ".join(street_tokens),
-        "city": " ".join(city_tokens),
+        "street": canonical_street,
+        "city": canonical_city,
         "zip_code": zip_code,
         "street_tokens": street_tokens,
         "city_tokens": city_tokens,

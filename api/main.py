@@ -13,6 +13,7 @@ app = FastAPI(title="SureLink API")
 class VerifyHomeownerRequest(BaseModel):
     address: str = Field(..., min_length=1, description="Property address to verify")
     record_id: Optional[str] = Field(default=None, description="Optional source record id")
+    homeowner_name: Optional[str] = Field(default=None, description="Optional homeowner name")
     email: Optional[str] = Field(default=None, description="Optional contact email")
     phone: Optional[str] = Field(default=None, description="Optional contact phone")
 
@@ -181,7 +182,7 @@ def normalize_property_value(value: Optional[float]) -> Optional[Union[float, in
 
 def map_verification_result(payload: VerifyHomeownerRequest) -> dict[str, Any]:
     input_address = payload.address.strip()
-    lookup = lookup_property(input_address)
+    lookup = lookup_property(input_address, homeowner_name=payload.homeowner_name)
     property_row = lookup["property_row"]
     normalized_address = lookup["normalized_address"] or input_address
     matched_address = lookup.get("matched_address")
