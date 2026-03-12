@@ -24,10 +24,12 @@ except ImportError:
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "florida_property_runtime.db"
 DEFAULT_DIAGNOSTIC_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "florida_property_diagnostic.db"
+DEFAULT_SOURCE_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "florida_property_lookup.db"
 DB_PATH = Path(os.getenv("SURELINK_DB_PATH", str(DEFAULT_DB_PATH))).expanduser()
 DIAGNOSTIC_DB_PATH = Path(
     os.getenv("SURELINK_DIAGNOSTIC_DB_PATH", str(DEFAULT_DIAGNOSTIC_DB_PATH))
 ).expanduser()
+SOURCE_DB_PATH = Path(os.getenv("SURELINK_SOURCE_DB_PATH", str(DEFAULT_SOURCE_DB_PATH))).expanduser()
 
 APPROVED_PROPERTY_TYPES = {"Single Family", "Townhouse"}
 MAX_PROPERTY_VALUE = 700000
@@ -454,6 +456,18 @@ def lookup_in_database(parsed, db_path):
     }
 
 
+def iter_fallback_db_paths(primary_db_path):
+    seen = set()
+    for candidate in (primary_db_path, DIAGNOSTIC_DB_PATH, SOURCE_DB_PATH):
+        if not candidate:
+            continue
+        candidate = Path(candidate).expanduser()
+        if candidate in seen or not candidate.exists():
+            continue
+        seen.add(candidate)
+        yield candidate
+
+
 def print_readable_result(result, property_row=None):
     print("Address: {0}".format(result["input_address"]))
     print("Match found: {0}".format("Yes" if result["match_found"] else "No"))
@@ -481,28 +495,35 @@ def print_readable_result(result, property_row=None):
 def lookup_property(full_address, db_path=None):
     parsed = parse_input_address(full_address)
     resolved_db_path = Path(db_path).expanduser() if db_path else DB_PATH
-    diagnostic_db_path = DIAGNOSTIC_DB_PATH
     normalized_input = (parsed.canonical + " " + parsed.zip_code).strip()
 
     if not resolved_db_path.exists():
         raise FileNotFoundError("SQLite database not found: {0}".format(resolved_db_path))
 
-    result = lookup_in_database(parsed, resolved_db_path)
-    property_row = result["property_row"]
-    lookup_error = result["lookup_error"]
-    match_confidence = result["match_confidence"]
-    match_method = result["match_method"]
-    owner_name = property_row.get("owner_name") if property_row else None
-    owner_names = result["owner_names"]
+    result = None
+    property_row = None
+    lookup_error = "Property not found"
+    match_confidence = 0.0
+    match_method = "normalize_only"
+    owner_name = None
+    owner_names = []
 
-    if not property_row and diagnostic_db_path.exists() and diagnostic_db_path != resolved_db_path:
-        diagnostic_result = lookup_in_database(parsed, diagnostic_db_path)
-        property_row = diagnostic_result["property_row"]
-        lookup_error = diagnostic_result["lookup_error"]
-        match_confidence = diagnostic_result["match_confidence"]
-        match_method = diagnostic_result["match_method"]
+    for candidate_db_path in iter_fallback_db_paths(resolved_db_path):
+        try:
+            result = lookup_in_database(parsed, candidate_db_path)
+        except sqlite3.Error as exc:
+            logger.warning("Skipping unreadable lookup database %s: %s", candidate_db_path, exc)
+            continue
+
+        property_row = result["property_row"]
+        lookup_error = result["lookup_error"]
+        match_confidence = result["match_confidence"]
+        match_method = result["match_method"]
         owner_name = property_row.get("owner_name") if property_row else None
-        owner_names = diagnostic_result["owner_names"]
+        owner_names = result["owner_names"]
+
+        if property_row:
+            break
 
     parsed_street, parsed_city = derive_output_parse(parsed, property_row)
     normalized_address = property_row["normalized_address"] if property_row else normalized_input
