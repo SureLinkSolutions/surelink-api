@@ -180,6 +180,19 @@ def normalize_property_value(value: Optional[float]) -> Optional[Union[float, in
     return value
 
 
+def extract_property_type(property_row: dict[str, Any]) -> Optional[str]:
+    property_type = property_row.get("property_type_label")
+    if property_type:
+        return property_type
+
+    fallback_property_type = property_row.get("property_type")
+    if isinstance(fallback_property_type, str):
+        cleaned = fallback_property_type.strip()
+        return cleaned or None
+
+    return None
+
+
 def map_verification_result(payload: VerifyHomeownerRequest) -> dict[str, Any]:
     input_address = payload.address.strip()
     lookup = lookup_property(input_address, homeowner_name=payload.homeowner_name)
@@ -219,7 +232,7 @@ def map_verification_result(payload: VerifyHomeownerRequest) -> dict[str, Any]:
 
     homestead_flag = property_row.get("homestead_flag")
     year_built = property_row.get("year_built")
-    property_type = property_row.get("property_type_label")
+    property_type = extract_property_type(property_row)
     property_value = property_row.get("property_value")
     year_built_pass = None if year_built is None else year_built <= 2008
     property_type_pass = None if property_type is None else property_type in APPROVED_PROPERTY_TYPES

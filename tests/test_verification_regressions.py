@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from api.main import VerifyHomeownerRequest, map_verification_result
 from Scripts.address_matching import parse_input_address
@@ -60,6 +61,37 @@ class VerificationRegressionTests(unittest.TestCase):
         self.assertEqual(result["verification_status"], "manual_review")
         self.assertEqual(result["manual_review_reason"], "Ambiguous property match")
         self.assertIsNone(result["eligible"])
+
+    def test_property_type_falls_back_to_alternate_lookup_key(self):
+        with patch("api.main.lookup_property") as mock_lookup_property:
+            mock_lookup_property.return_value = {
+                "property_row": {
+                    "homestead_flag": 1,
+                    "year_built": 2001,
+                    "property_type": "Townhouse",
+                    "property_value": 325000,
+                },
+                "normalized_address": "123 MAIN ST TAMPA 33602",
+                "matched_address": "123 MAIN ST TAMPA 33602",
+                "address_corrected": False,
+                "match_confidence": 1.0,
+                "match_method": "exact_normalized",
+                "decision": "PASS",
+                "reason": "Eligible",
+                "county": "Hillsborough",
+                "owner_name": "DOE JOHN",
+            }
+
+            result = map_verification_result(
+                VerifyHomeownerRequest(
+                    address="123 Main St Tampa FL 33602",
+                    homeowner_name="John Doe",
+                )
+            )
+
+        self.assertEqual(result["property_type"], "Townhouse")
+        self.assertEqual(result["review_property_type"], "Townhome")
+        self.assertTrue(result["property_type_pass"])
 
 
 if __name__ == "__main__":

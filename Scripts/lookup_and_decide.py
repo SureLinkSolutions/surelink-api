@@ -55,6 +55,20 @@ GENERIC_OWNER_WORDS = {
     "THE",
 }
 
+PROPERTY_TYPE_CASE_SQL = """
+CASE
+    WHEN dor_uc IS NULL THEN NULL
+    WHEN printf('%02d', CAST(dor_uc AS INTEGER)) = '01' THEN 'Single Family'
+    WHEN printf('%02d', CAST(dor_uc AS INTEGER)) = '02' THEN 'Mobile Home'
+    WHEN printf('%02d', CAST(dor_uc AS INTEGER)) = '04' THEN 'Condo'
+    WHEN printf('%02d', CAST(dor_uc AS INTEGER)) = '05' THEN 'Townhouse'
+    WHEN printf('%02d', CAST(dor_uc AS INTEGER)) = '06' THEN 'Cooperative'
+    WHEN printf('%02d', CAST(dor_uc AS INTEGER)) = '07' THEN 'Vacant'
+    WHEN printf('%02d', CAST(dor_uc AS INTEGER)) = '08' THEN 'Multi Family'
+    ELSE 'Other'
+END
+""".strip()
+
 
 def format_currency(value):
     if value is None:
@@ -234,6 +248,15 @@ def base_columns():
 
 
 def build_select_map(available_columns):
+    if "property_type_label" in available_columns:
+        property_type_select = "property_type_label"
+    elif "property_type" in available_columns:
+        property_type_select = "property_type AS property_type_label"
+    elif "dor_uc" in available_columns:
+        property_type_select = PROPERTY_TYPE_CASE_SQL + " AS property_type_label"
+    else:
+        property_type_select = "NULL AS property_type_label"
+
     return {
         "parcel_id": "parcel_id",
         "normalized_address": "normalized_address",
@@ -241,7 +264,7 @@ def build_select_map(available_columns):
         "homestead_flag": "homestead_flag" if "homestead_flag" in available_columns else "homestead_exemption AS homestead_flag",
         "property_value": "property_value",
         "county_source": "county_source" if "county_source" in available_columns else "county AS county_source",
-        "property_type_label": "property_type_label" if "property_type_label" in available_columns else "NULL AS property_type_label",
+        "property_type_label": property_type_select,
         "owner_name": "owner_name" if "owner_name" in available_columns else "NULL AS owner_name",
         "city": "city" if "city" in available_columns else "NULL AS city",
         "zip": "zip" if "zip" in available_columns else "NULL AS zip",
