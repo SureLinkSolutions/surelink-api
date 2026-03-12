@@ -160,6 +160,27 @@ def _extract_zip_and_state(full_address):
     return raw, zip_code, state
 
 
+def _street_city_boundary(tokens, street_type_values):
+    boundary = None
+    for index, token in enumerate(tokens):
+        if token in street_type_values:
+            boundary = index + 1
+            while boundary < len(tokens) and tokens[boundary] in street_type_values:
+                boundary += 1
+            break
+
+    if boundary is None:
+        return None
+
+    while boundary < len(tokens) and tokens[boundary] in DIRECTIONAL_WORDS:
+        boundary += 1
+
+    while boundary < len(tokens) and re.search(r"\d", tokens[boundary]):
+        boundary += 1
+
+    return boundary
+
+
 def _split_street_city(raw_without_zip_state):
     if not raw_without_zip_state:
         return "", ""
@@ -174,17 +195,8 @@ def _split_street_city(raw_without_zip_state):
         return "", ""
 
     street_type_values = set(STREET_TYPE_ALIASES.values()) | set(STREET_TYPE_ALIASES.keys())
-    boundary = None
-    for index, token in enumerate(tokens):
-        if token in street_type_values:
-            boundary = index + 1
-            break
-
+    boundary = _street_city_boundary(tokens, street_type_values)
     if boundary is not None:
-        while boundary < len(tokens) and tokens[boundary] in DIRECTIONAL_WORDS:
-            boundary += 1
-        while boundary < len(tokens) and re.search(r"\d", tokens[boundary]):
-            boundary += 1
         street_tokens = tokens[:boundary]
         city_tokens = tokens[boundary:]
         return " ".join(street_tokens), " ".join(city_tokens)
@@ -202,12 +214,7 @@ def split_normalized_address(normalized_address):
     core_tokens = tokens[:-1] if zip_code else tokens
 
     street_type_values = set(STREET_TYPE_ALIASES.values())
-    boundary = None
-    for index, token in enumerate(core_tokens):
-        if token in street_type_values:
-            boundary = index + 1
-            break
-
+    boundary = _street_city_boundary(core_tokens, street_type_values)
     if boundary is None:
         return {
             "street": " ".join(core_tokens),
@@ -216,12 +223,6 @@ def split_normalized_address(normalized_address):
             "street_tokens": core_tokens,
             "city_tokens": [],
         }
-
-    while boundary < len(core_tokens) and core_tokens[boundary] in DIRECTIONAL_WORDS:
-        boundary += 1
-
-    while boundary < len(core_tokens) and re.search(r"\d", core_tokens[boundary]):
-        boundary += 1
 
     street_tokens = core_tokens[:boundary]
     city_tokens = core_tokens[boundary:]

@@ -6,6 +6,13 @@ from Scripts.address_matching import parse_input_address
 
 
 class AddressParsingRegressionTests(unittest.TestCase):
+    def test_ocala_hemlock_terrace_drive_keeps_full_street_name(self):
+        parsed = parse_input_address("20 Hemlock Terrace Drive Ocala FL 34472")
+
+        self.assertEqual(parsed.canonical_street, "20 HEMLOCK TER DR")
+        self.assertEqual(parsed.canonical_city, "OCALA")
+        self.assertEqual(parsed.zip_code, "34472")
+
     def test_cape_coral_address_splits_street_and_city(self):
         parsed = parse_input_address("2913 NW 13th street Cape Coral FL 33993")
 
@@ -24,6 +31,19 @@ class AddressParsingRegressionTests(unittest.TestCase):
 
 
 class VerificationRegressionTests(unittest.TestCase):
+    def test_ocala_hemlock_terrace_drive_is_eligible_with_homestead(self):
+        result = map_verification_result(
+            VerifyHomeownerRequest(
+                address="20 Hemlock Terrace Drive Ocala FL 34472",
+            )
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["verification_status"], "eligible")
+        self.assertTrue(result["eligible"])
+        self.assertTrue(result["homestead_exemption"])
+        self.assertEqual(result["matched_address"], "20 HEMLOCK TER DR OCALA 34472")
+
     def test_cape_coral_address_is_eligible(self):
         result = map_verification_result(
             VerifyHomeownerRequest(
