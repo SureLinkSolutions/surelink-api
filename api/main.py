@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any, Optional, Union
 
-from fastapi import FastAPI
+from fastapi import Body, FastAPI, Request
 from pydantic import BaseModel, Field
 
 from scripts.verification.lookup_and_decide import APPROVED_PROPERTY_TYPES, lookup_property
@@ -351,3 +351,12 @@ def verify_homeowner(payload: VerifyHomeownerRequest) -> dict[str, Any]:
             manual_review_required=True,
             manual_review_reason="Unexpected verification error: {0}".format(exc),
         )
+
+
+@app.post("/parse-estimate")
+async def parse_estimate(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    return {
+        "status": "success",
+        "message": "Estimate endpoint is live",
+        "received_data": payload,
+    }
