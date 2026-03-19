@@ -6,7 +6,8 @@ import pandas as pd
 MASTER_CSV = Path("/Users/ericbrown/Google Drive/Shared drives/My Safe Florida Home/Property Intelligence/States/Florida/Master Lookup/florida_property_master.csv")
 
 # Output SQLite DB
-DB_PATH = Path("/Users/ericbrown/SureLink/data/florida_property_lookup.db")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DB_PATH = PROJECT_ROOT / "data" / "florida_property_lookup.db"
 
 TABLE_NAME = "properties"
 CHUNK_SIZE = 100_000
@@ -62,4 +63,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

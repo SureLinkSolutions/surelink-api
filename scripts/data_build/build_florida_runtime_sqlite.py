@@ -2,8 +2,9 @@ import sqlite3
 from pathlib import Path
 
 
-SOURCE_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "florida_property_lookup.db"
-RUNTIME_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "florida_property_runtime.db"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SOURCE_DB_PATH = PROJECT_ROOT / "data" / "florida_property_lookup.db"
+RUNTIME_DB_PATH = PROJECT_ROOT / "data" / "florida_property_runtime.db"
 TABLE_NAME = "properties"
 
 APPROVED_PROPERTY_TYPES = ("Single Family", "Townhouse")

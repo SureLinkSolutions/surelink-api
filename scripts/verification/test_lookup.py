@@ -1,7 +1,8 @@
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path("/Users/ericbrown/SureLink/data/florida_property_lookup.db")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DB_PATH = PROJECT_ROOT / "data" / "florida_property_lookup.db"
 
 normalized_address = "7605 NW 4 PL 107 MARGATE 33063"
 
@@ -22,5 +23,4 @@ for row in rows:
     print(row)
 
 conn.close()
-
 

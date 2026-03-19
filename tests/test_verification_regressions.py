@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from api.main import VerifyHomeownerRequest, map_verification_result
-from Scripts.address_matching import parse_input_address
+from scripts.verification.address_matching import parse_input_address
 
 
 class AddressParsingRegressionTests(unittest.TestCase):

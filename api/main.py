@@ -4,7 +4,7 @@ from typing import Any, Optional, Union
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-from Scripts.lookup_and_decide import APPROVED_PROPERTY_TYPES, lookup_property
+from scripts.verification.lookup_and_decide import APPROVED_PROPERTY_TYPES, lookup_property
 
 
 app = FastAPI(title="SureLink API")

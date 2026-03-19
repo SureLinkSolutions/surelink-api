@@ -23,9 +23,10 @@ except ImportError:
         split_normalized_address,
     )
 
-DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "florida_property_runtime.db"
-DEFAULT_DIAGNOSTIC_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "florida_property_diagnostic.db"
-DEFAULT_SOURCE_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "florida_property_lookup.db"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "florida_property_runtime.db"
+DEFAULT_DIAGNOSTIC_DB_PATH = PROJECT_ROOT / "data" / "florida_property_diagnostic.db"
+DEFAULT_SOURCE_DB_PATH = PROJECT_ROOT / "data" / "florida_property_lookup.db"
 DB_PATH = Path(os.getenv("SURELINK_DB_PATH", str(DEFAULT_DB_PATH))).expanduser()
 DIAGNOSTIC_DB_PATH = Path(
     os.getenv("SURELINK_DIAGNOSTIC_DB_PATH", str(DEFAULT_DIAGNOSTIC_DB_PATH))
@@ -719,7 +720,7 @@ def main():
 
     if len(sys.argv) < 2:
         print("Usage:")
-        print('python3 lookup_and_decide.py "234 Garden Grove Parkway, Vero Beach FL 32962"')
+        print('python3 scripts/verification/lookup_and_decide.py "234 Garden Grove Parkway, Vero Beach FL 32962"')
         sys.exit(1)
 
     result = lookup_property(sys.argv[1])
